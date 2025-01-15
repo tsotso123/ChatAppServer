@@ -1,0 +1,103 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>game</title>
+    <base href="/game" />
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/7.0.5/signalr.min.js"></script>
+</head>
+
+<body>
+
+    <div id="canvasContainer">
+
+    </div>
+    <canvas id="testCanvas" width="1600" height="600" style="position: absolute; top: 0; left: 0;"></canvas>
+    
+    <div style="background-image: url('assets/maps/sand.png'); position: relative; width: 1600px; height: 600px; margin-left: auto; margin-right: auto;">
+        <canvas id="gameCanvas" width="1600" height="600"
+                style="padding-left: 0; padding-right: 0; display: block; ">
+        </canvas>
+    </div>
+    <canvas id="UiCanvas" width="1600" height="600"
+            style="padding-left: 0; padding-right: 0; display: block; position: absolute; top: 0; left: 0;">
+    </canvas>
+
+
+    <div style=" display: flex; justify-content: center;gap: 10px;margin-top: 20px;" class="button-container">
+        <button onclick="spawnUnit('Bat')">Bat:5</button>
+        <button onclick="spawnUnit('Assassin')">Assassin:10</button>
+        <button onclick="spawnUnit('DarkDemon')">DarkDemon:15</button>
+        <button onclick="spawnUnit('Demon')">Demon:20</button>
+    </div>
+
+    <div id="app">
+
+    </div>
+
+
+    <script src="_framework/blazor.webassembly.js"></script>
+
+
+
+    <script src="game.js"></script>
+
+    <script>
+        const token = localStorage.getItem('authToken');
+        const opponent = localStorage.getItem('opponent');
+        connectToSignalRHub(token);
+
+        function spawnUnit(unit){
+            canBuyUnit(unit).then(async (canBuy) => {
+                if (canBuy) {
+                    console.log('You can buy this unit!');
+                    await globalThis.hub.invoke('SpawnedUnit', unit, opponent);
+                    spawnAlly(unit);
+                } else {
+                    console.log('Not enough resources to buy this unit.');
+                }
+            });
+
+            
+        }
+
+
+        async function connectToSignalRHub(token) {
+            const connection = new signalR.HubConnectionBuilder()
+                .withUrl('/chat', {
+                    headers: {
+                        Authorization: `Bearer ${token}`, // Add the Authorization header here
+                    },
+                })
+                .build();
+                
+            try {
+                // Start the connection
+                await connection.start();
+                console.log('Connected to SignalR Hub');
+                globalThis.hub = connection;
+            } catch (err) {
+                console.error('Error connecting to SignalR Hub:', err);
+                alert('No auth token found. Please log in again.');
+            }
+
+            // Example: Listening to a message event
+
+            connection.on('EnemySpawned', (unit) => {
+                console.log('enemy spawned');
+                spawnEnemy(unit);
+            });
+
+            window.addEventListener("beforeunload", function (e) {
+                connection.stop();
+            });
+
+        }
+
+    </script>
+</body>
+
+</html>

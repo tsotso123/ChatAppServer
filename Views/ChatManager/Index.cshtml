@@ -1,0 +1,393 @@
+﻿@model IEnumerable<ChatAppServer.Models.DirectChat>
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat Page</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="styles/ChatStyles.css" rel="stylesheet" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/7.0.5/signalr.min.js"></script>
+</head>
+
+<body>
+    
+
+    <div class="chat-container">
+        
+       
+        <!-- Sidebar -->
+        <div class="sidebar">
+
+            <div class="search-bar">
+                
+                    <input id="searchInput" class="form-control me-2" type="search" placeholder="Search..." aria-label="Search">
+                    <button onclick="SearchUser()" class="btn btn-primary" type="submit">Search</button>
+               
+            </div>
+
+
+            <div class="p-3">
+                <h5>Your Contacts</h5>
+            </div>
+            
+
+            @foreach (var chat in Model)
+            {
+
+
+                @foreach (var participant in chat.Participants)
+                {
+                    if (participant.Username != User.Identity?.Name)
+                    {
+                        <div class="contact" style="display:block">
+                            <strong>@participant.Username</strong>
+                            <p>@chat.Messages.ElementAt(chat.Messages.Count-1).Content</p>
+                        </div>
+                    }
+                }
+
+                
+            }
+            
+        </div>
+
+        <!-- Chat Area -->
+        <div class="chat-area">
+            <!-- Chat Header -->
+            <div class="chat-header">
+                <h5>John Doe</h5>
+                @* <button class="btn btn-sm btn-light">Create Group</button> *@
+                <button class="btn btn-sm btn-light" onclick=SendInvite()>invite to game</button>
+            </div>
+
+
+            <div class="messages">               
+                @{
+                    var firstChat = Model.First();
+                                                @foreach (var msg in firstChat.Messages)
+                    {
+                        if (msg.RecipientUsername != User.Identity?.Name)
+                        {
+                                                        <div class="message sent">@msg.Content</div>
+                        }
+                        else
+                        {
+                                                        <div class="message received">@msg.Content</div>
+                        }
+                    }
+                }
+            </div>
+
+            
+
+
+            <!-- Chat Input -->
+            <<div class="chat-input">
+                <input type="text" id="messageInput" placeholder="Type a message">
+                <button id="sendButton"><i class="bi bi-send-fill"></i></button>
+            </div>
+            
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/js/bootstrap.bundle.min.js"></script>
+
+    <script>
+        const username = '@User.Identity?.Name'; 
+        
+
+        // Retrieve the token from localStorage
+        const token = localStorage.getItem('authToken');
+
+        if (!token) {
+            alert('No auth token found. Please log in again.');
+            window.location.href = 'account/login'; // Redirect back to login if no token
+            //return;
+        }
+
+        // Select all div elements with the class 'contact'
+        const contactDivs = document.querySelectorAll('.contact');
+        
+        // Loop through each contact div and add a click event listener
+        contactDivs.forEach(contactDiv => {
+            contactDiv.addEventListener('click', () => {
+                console.log('clicked');
+                const username = contactDiv.querySelector('strong').textContent;
+                LoadChat(username); 
+            });
+        });
+        let selectedChat = contactDivs[0].querySelector('strong').textContent;
+
+        async function SendInvite()
+        {
+            await globalThis.hub.invoke('SendInvite', String(selectedChat));
+        }
+
+        function LoadChat(user) { 
+            // Use the token in an API request
+            fetch("/ChatManager/GetMessages?user="+user, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`
+                },
+
+            })
+                .then(async (response) => {
+                    if (response.ok) {
+                        return response.json();
+                    } else {
+                        // Handle error if necessary
+                        console.log(response);
+                    }
+                })
+                .then(messages => {
+                    // Get the messages container div
+                    const messagesContainer = document.querySelector('.messages');
+
+                    // Clear any existing messages
+                    messagesContainer.innerHTML = '';
+                    messages.forEach(msg => {
+                        const messageDiv = document.createElement('div');
+
+                        // Check if the message is received or sent by the user
+                        if (msg.recipientUsername !== username) {
+                            messageDiv.classList.add('message', 'sent');
+                        } else {
+                            messageDiv.classList.add('message', 'received');
+                        }
+
+                        // Set the message content
+                        messageDiv.textContent = msg.content;
+
+                        // Append the new message to the messages container
+                        messagesContainer.appendChild(messageDiv);
+                    });
+
+                    selectedChat = user;
+                        })
+                .catch(error => console.error('Error:', error));
+        }
+
+        connectToSignalRHub(token);       
+
+
+        async function connectToSignalRHub(token) {
+            const connection = new signalR.HubConnectionBuilder()
+                .withUrl('/chat', {
+                    headers: {
+                        Authorization: `Bearer ${token}`, // Add the Authorization header here
+                    },
+                })
+                .build();
+
+            try {
+                // Start the connection
+                await connection.start();
+                console.log('Connected to SignalR Hub');
+                globalThis.hub = connection;
+            } catch (err) {
+                console.error('Error connecting to SignalR Hub:', err);
+                alert('No auth token found. Please log in again.');
+            }
+
+            // Example: Listening to a message event
+            
+            connection.on('ReceiveMessage', async (senderUser, message, sentAt, msgId) => {
+                console.log(`Message from ${senderUser}: ${message}`);
+
+                const messagesContainer = document.querySelector('.messages');
+                const messageDiv = document.createElement('div');
+
+                // Check if the message is received or sent by the user
+                messageDiv.classList.add('message', 'received');
+                // Set the message content
+                messageDiv.textContent = message;
+
+                // Append the new message to the messages container
+                messagesContainer.appendChild(messageDiv);
+
+                await connection.invoke('MessageConfirmation', String(msgId));
+            });
+
+            connection.on('ReceiveInvite', async(fromUsername)=> {
+                // Show a confirmation alert to the user
+                const accept = confirm(`${fromUsername} has invited you. Do you accept?`);
+
+                if (accept) {
+                    // User accepted the invite
+                    console.log("Invite accepted");
+
+                    // Send a message to the server to indicate acceptance
+                    await connection.invoke('AcceptInvite', fromUsername);
+
+                    //alert("You have accepted the invite!");
+                } else {
+                    // User declined the invite
+                    console.log("Invite declined");
+
+
+
+                    //alert("You have declined the invite.");
+                }
+
+            });
+
+            connection.on('StartGame', (user) => {
+                localStorage.setItem('opponent', user);
+                window.location.href = '/Game';
+            });
+
+            connection.on('JoinGroup', async (user, groupId, groupName) => {
+                console.log(`joining group created by: ${user}: name of group: ${groupName}`);
+                await connection.invoke('JoinGroup', String(groupId));
+            });
+
+            connection.on('ReceiveGroupMessage', async (username, message, timeSent, unifiedMsgId, groupIdString) => {
+                console.log(`Message from group ${groupIdString}: ${message} by: ${username}`);
+                await connection.invoke('MessageConfirmation', String(unifiedMsgId));
+            });
+
+            connection.on('MessageConfirmation', (msgIdForConfirmation, timeSent) => {
+                console.log(`Message from ${user}: ${message}`);
+            });
+
+            connection.on('SentGroupMessageWasReceived', async (msgConfirmationIdString, username, groupChatId) => {
+                console.log(`Message from ${user}: ${message}`);
+                await connection.invoke('SentGroupMessageWasReceived', String(msgConfirmationIdString),username);
+            });
+
+            connection.on('SentMessageWasReceived', async (msgConfirmationIdString, username) => {
+                console.log(`sent Message was received, By: ${username}: ${msgConfirmationIdString}`);
+                await connection.invoke('SentMessageWasReceived', String(msgConfirmationIdString));
+            });
+            
+            window.addEventListener("beforeunload", function (e) {
+                connection.stop();
+            });
+
+        }
+
+        function generateUUID() {
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+                const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
+                return v.toString(16);
+            });
+        }
+
+        document.getElementById("sendButton").addEventListener("click", async () => {
+            const messageInput = document.getElementById("messageInput");
+            const message = messageInput.value.trim();
+            
+            const msgIdForConfirmation = generateUUID(); // Example: Timestamp as ID
+
+            if (message) {
+                try {
+                    // Invoke the SendDirectMessage method on the hub
+                    await globalThis.hub.invoke("SendDirectMessage", selectedChat, message, msgIdForConfirmation);
+                    console.log("Message sent:", message);
+                    const messagesContainer = document.querySelector('.messages');
+                    const messageDiv = document.createElement('div');
+
+                    // Check if the message is received or sent by the user
+                    messageDiv.classList.add('message', 'sent');
+                    // Set the message content
+                    messageDiv.textContent = message;
+
+                    // Append the new message to the messages container
+                    messagesContainer.appendChild(messageDiv);
+
+                    // Optionally, clear the input field after sending
+                    messageInput.value = "";
+
+                    
+                } catch (err) {
+                    console.error("Error sending message:", err.toString());
+                }
+            } else {
+                alert("Please enter a message before sending!");
+            }
+        });
+
+        function SearchUser() {
+            var user = document.getElementById("searchInput").value;
+            if (user === '') 
+            { 
+                const contactDivs = document.querySelectorAll('.contact');
+                contactDivs.forEach(contactDiv => {
+                    if (contactDiv.style.display === "none")
+                    {
+                        contactDiv.style.display = "block";
+                    }
+                    if (contactDiv.classList.contains('added'))
+                    {
+                        contactDiv.parentNode.removeChild(contactDiv);
+
+                    }
+                    
+                });
+                return;
+            }
+
+
+            // Use the token in an API request
+            fetch("Account/SearchUsers?usernameQuery=" + user, {
+                method: 'GET'
+
+            })
+                .then(response => {
+                    if (response.ok) {
+                        return response.json(); // Parse the JSON response
+                    } else {
+                        throw new Error('Failed to fetch accounts');
+                    }
+                })
+                .then(accounts => {
+                    const contactDivs = document.querySelectorAll('.contact');
+                    contactDivs.forEach(contactDiv => {
+                        contactDiv.style.display = "none";
+                    });
+
+
+                    accounts.forEach((account, index) => {
+                        
+                            const strongElement = document.createElement('strong');
+                            strongElement.textContent = account.username;
+                            
+                            const divElement = document.createElement('div');
+                            divElement.className = "contact added";
+                            
+                            divElement.appendChild(strongElement);
+                            //contactDivs.appendChild(divElement);
+                            const sidebar = document.querySelector('.sidebar');
+                            sidebar.appendChild(divElement);
+
+                            divElement.addEventListener('click', () => {
+                                console.log('clicked');
+                                const username = account.username;
+                                //LoadChat(username); 
+                                selectedChat = username;
+
+                                const messagesContainer = document.querySelector('.messages');
+
+                                // Clear any existing messages
+                                messagesContainer.innerHTML = '';
+                            });
+                        
+
+                            
+
+                        
+                    });
+                })
+                .catch(error => {
+                    console.error('Error fetching accounts:', error);
+                });
+            
+        }
+
+    </script>
+</body>
+
+</html>
